@@ -1,0 +1,6 @@
+    <launch>
+        
+	<node pkg="nonlinear_observer" type="nlo" name="nlo_localization_node" clear_params="true" output="screen" />
+	<rosparam file="$(find nonlinear_observer)/apps/ros/parameters/test.yaml" /> 
+
+    </launch>

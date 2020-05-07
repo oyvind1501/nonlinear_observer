@@ -35,9 +35,9 @@ include_directories(
         ${EIGEN3_INCLUDE_DIR}
 )
 
-#add_executable(nonlinear_observer apps/ros/ros_node.cpp)
+add_executable(nlo apps/ros/ros_node.cpp)
 
-#target_link_libraries(nonlinear_observer PRIVATE nonlinear_observer_lib ${catkin_LIBRARIES})
+target_link_libraries(nlo PRIVATE nonlinear_observer_lib ${catkin_LIBRARIES})
 
 add_executable(nonlinear_observer_test apps/test/main.cpp)
 target_link_libraries(nonlinear_observer_test PRIVATE nonlinear_observer_lib)
