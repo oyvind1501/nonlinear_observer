@@ -187,6 +187,7 @@ public:
     void predict(const Eigen::Vector3d& gyro_msg, const Eigen::Vector3d& acc_msg, const double& Ts);
     void UpdatePressureZ(const double& zPressureZpos, const Eigen::MatrixXd& RpressureZ);
     void UpdateDVl(const Eigen::Vector3d& dvlmsg, const Eigen::Matrix3d& Rdvl);
+    void TMOvelocityMeasurements(const Eigen::Vector3d& dvl_measurement, const Eigen::Matrix3d& R_dvl);
 
     inline Eigen::Quaterniond getQuaternion() const
   {

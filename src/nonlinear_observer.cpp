@@ -13,7 +13,7 @@ NLO::NLO(const parametersInNLO& parameters)
   , use_feedback_interconnection_{parameters.use_feedback_interconnection}
   , use_ENU_{ parameters.use_ENU }
   , states_{parameters.p_init,parameters.v_init,parameters.q_init,quat2RotMat_fast(parameters.q_init), parameters.b_ars_init, parameters.b_acc_init, parameters.xi_init, parameters.initial_covariance}
-  , k1_{parameters.ki}
+  , k1_{parameters.k1}
   , k2_{parameters.k2}
   , KI_{parameters.ki}
   , Mb_{parameters.mb}
@@ -37,6 +37,7 @@ NLO::NLO(const parametersInNLO& parameters)
   std::cout << "v_init: "<<parameters.v_init<<std::endl;
   std::cout << "q_init: "<<parameters.q_init.w()<<std::endl;
   std::cout << "R_init: "<<quat2RotMat_fast(parameters.q_init)<<std::endl;
+  std::cout << "use_feedback_interconnection: "<<parameters.use_feedback_interconnection<<std::endl;
 
 }
 
@@ -191,8 +192,11 @@ void NLO::predict(const Vector3d& gyro_msg, const Vector3d& acc_msg, const doubl
     Vector3d gyroRectified = (Sg_ * gyro_msg) - gyroBias;
 
      // Update and predict
+
+     Ts_ = Ts;
     
-    //std::cout<<"in predict: "<<std::endl;
+
+
 
     AllocateNLO();
     AllocateTMO();
@@ -218,7 +222,7 @@ void NLO::UpdateDVl(const Vector3d& dvlmsg, const Matrix3d& Rdvl)
     const Matrix3d R_dvl{Rdvl};
     const double delta_t_dvl{1.0/8.0};
     secondAttitudeVectorPair(delta_t_dvl,dvl_msg);
-    
+    TMOvelocityMeasurements(dvl_msg,R_dvl);
 }
 
 
@@ -233,7 +237,9 @@ void NLO::updateFilter()
         double Ts{imu_msg_buffer_.front().deltaIMU_};
 
         // TODO: Maybe change this
-        //Ts_ = Ts;
+        Ts_ = Ts;
+
+        
 
         Vector3d accBias = Sa_ * states_.b_acc_b_hat;
         Vector3d gyroBias = Sg_ * states_.b_ars_b_hat;
@@ -249,26 +255,24 @@ void NLO::updateFilter()
 
         firstAttitudeVectorPair(accelerationRectified);
 
-        /*
+        
         if (dvl_msg_buffer_.size() == 1)
         {
-            
+           
             const Vector3d dvl_msg{dvl_msg_buffer_.back().zDVl_};
             const Matrix3d R_dvl{dvl_msg_buffer_.back().R_dvl_};
             const double delta_t_dvl{1.0/8.0};
             secondAttitudeVectorPair(delta_t_dvl,dvl_msg);
-            emptyDVLBuffer();
-            
+            TMOvelocityMeasurements(dvl_msg,R_dvl);
         }
-        */
+        
 
         attitudeCorrection();
         ARSBiasCorrection();
 
-        /*
+        
         if (pressureZ_msg_buffer_.size() == 1)
         {
-            
             const double prs_msg{pressureZ_msg_buffer_.back().pressureZ_msg_};
             const Matrix<double,1,1> R_pressureZ{pressureZ_msg_buffer_.back().R_pressureZ_};
             const double pressureZleverarm{0};
@@ -277,8 +281,19 @@ void NLO::updateFilter()
             emptyPressureZBuffer();
             
         }
-        */
 
+        if (dvl_msg_buffer_.size() == 1)
+        {
+           
+            const Vector3d dvl_msg{dvl_msg_buffer_.back().zDVl_};
+            const Matrix3d R_dvl{dvl_msg_buffer_.back().R_dvl_};
+            const double delta_t_dvl{1.0/8.0};
+            TMOvelocityMeasurements(dvl_msg,R_dvl);
+            emptyDVLBuffer();
+        }
+
+        
+        
         attitudePredictionAhead(gyroRectified);
         posVelPredictionAhead(accelerationRectified);
     }
@@ -287,6 +302,9 @@ void NLO::updateFilter()
 
 void NLO::firstAttitudeVectorPair(const Eigen::Vector3d& f_nb_b)
 {
+  
+
+
 
     Vector3d v_b1{f_nb_b/f_nb_b.norm()};
     Vector3d f_ib_n_hat{Vector3d::Zero()};
@@ -308,7 +326,7 @@ void NLO::firstAttitudeVectorPair(const Eigen::Vector3d& f_nb_b)
     //Vector3d sigma_hat{Eigen::Vector3d::Zero()};
     Vector3d sigma_hat;
     sigma_hat.setZero();
-    sigma_hat = k1_*crossProductMatrix(v_b1)*v_b1_hat; 
+    sigma_hat = crossProductMatrix(k1_*v_b1)*v_b1_hat; // k1_*
 
     optparams_.v_b1 = v_b1;
     //std::cout<<"V_b1: "<<v_b1<<std::endl;
@@ -327,7 +345,7 @@ void NLO::secondAttitudeVectorPair(const double& delta_t_dvl, const Eigen::Vecto
   //std::cout<<"dvl_scale: "<<dvl_scale<<std::endl;
   Vector3d v_b_dvl{dvl_measurement};
   //std::cout<<"v_b_dvl: "<<v_b_dvl<<std::endl;
-  Vector3d v_b2 = v_b_dvl/std::max(v_b_dvl.norm(),0.001);
+  Vector3d v_b2 = v_b_dvl/std::max(v_b_dvl.norm(),0.001); // 0.001
   //std::cout<<"V_b2: "<<v_b2<<std::endl;
   v_b2 = crossProductMatrix(optparams_.v_b1)*v_b2;
   //std::cout<<"v_b2: "<<v_b2<<std::endl;
@@ -338,7 +356,7 @@ void NLO::secondAttitudeVectorPair(const double& delta_t_dvl, const Eigen::Vecto
   //std::cout<<"v_n2"<<v_n2<<std::endl;
   Vector3d v_b2_hat{current_Update_.R_hat.transpose()*v_n2};
   //std::cout<<"v_b2_hat"<<v_b2_hat<<std::endl;
-  optparams_.sigma_hat = optparams_.sigma_hat + (dvl_scale*k2_*crossProductMatrix(v_b2)*v_b2_hat);
+  optparams_.sigma_hat = optparams_.sigma_hat + (dvl_scale*crossProductMatrix(k2_*v_b2)*v_b2_hat); // k2_*
   //std::cout<<"sigma_hat: "<<optparams_.sigma_hat<<std::endl;
 }
 
@@ -386,6 +404,7 @@ void NLO::ARSBiasCorrection()
 
 void NLO::TMOPositionMeasurements(const double& pressureZvalue, const double& pressureZleverarm, const double& R_pressure_Z)
 {
+  
   double y{pressureZvalue};
   double y_hat = current_Update_.p_hat(2);
   //std::cout<<"y_hat: "<<y_hat<<std::endl;
@@ -400,9 +419,24 @@ void NLO::TMOPositionMeasurements(const double& pressureZvalue, const double& pr
   //std::cout<<"P_hat"<<current_Update_.P_hat<<std::endl;
 }
 
+void NLO::TMOvelocityMeasurements(const Eigen::Vector3d& dvl_measurement, const Eigen::Matrix3d& R_dvl)
+{
+  Vector3d y_vel{dvl_measurement};
+  Vector3d y_hat_vel{current_Update_.R_hat.transpose()*current_Update_.v_hat};
+  Matrix<double,3,9> H;
+  H.setZero();
+  H << Zeros_3x3_,current_Update_.R_hat.transpose(),Zeros_3x3_;
+  MatrixXd Kalman_gain = (current_Update_.P_hat*H.transpose())*(H*current_Update_.P_hat*H.transpose() + R_dvl).inverse();
+  //std::cout<<"Kalman gain:"<<Kalman_gain<<std::endl;
+  current_Update_.X_hat = current_Update_.X_hat + Kalman_gain*(y_vel-y_hat_vel);
+  //std::cout<<"X_hat: "<<current_Update_.X_hat<<std::endl;
+  current_Update_.P_hat =(I_9x9_ - Kalman_gain*H)*current_Update_.P_hat*(I_9x9_-Kalman_gain*H).transpose() + Kalman_gain*R_dvl*Kalman_gain.transpose();
+  //std::cout<<"P_hat"<<current_Update_.P_hat<<std::endl;
+}
+
 void NLO::attitudePredictionAhead(const Eigen::Vector3d omega_imu_b_mes)
 {
-  Vector3d delta_att{Ts_*(omega_imu_b_mes)}; //- current_Update_.b_ars_b_hat)};  /// --------------NBNBNBNB
+  Vector3d delta_att{Ts_*(omega_imu_b_mes - current_Update_.b_ars_b_hat)}; //- current_Update_.b_ars_b_hat)};  /// --------------NBNBNBNB
   //std::cout<<"delta_att: "<<delta_att<<std::endl;
   double delta_att_norm{delta_att.norm()};
   //std::cout<<"delta_att_norm: "<<delta_att_norm<<std::endl;

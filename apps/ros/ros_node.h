@@ -29,6 +29,21 @@ const Eigen::Vector3d IMUALIGNMENT((Eigen::Vector3d() << -0.004635, 0.009897, 0)
 
 const Eigen::Vector3d roll_pitch_yaw_NED_and_alignment_corrected = IMURPYTONED + IMUALIGNMENT;
 
+
+struct EulerAngles
+{
+  double roll, pitch, yaw;
+};
+
+struct Quat
+{
+  double w, x, y, z;
+};
+
+
+
+
+
 class NLO_Node
 {
 public:
@@ -94,3 +109,4 @@ void setRpressureZFromYamlFile(Eigen::Matrix<double, 1, 1>& R_pressureZ);
 double meanOfVector(const std::vector<double>& vec);
 double maxOfVector(const std::vector<double>& vec);
 double stanardDeviationOfVector(const std::vector<double>& vec);
+EulerAngles fromQuaternionToEulerAngles2(const Quat& q);

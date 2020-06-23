@@ -8,6 +8,35 @@ using namespace Eigen;
 using namespace nlo;
 
 
+
+
+EulerAngles fromQuaternionToEulerAngles2(const Quat& q)
+{
+  EulerAngles angles;
+
+  // roll (x-axis rotation)
+  double sinr_cosp = 2 * (q.w * q.x + q.y * q.z);
+  double cosr_cosp = 1 - 2 * (q.x * q.x + q.y * q.y);
+  angles.roll = std::atan2(sinr_cosp, cosr_cosp);
+
+  // pitch (y-axis rotation)
+  double sinp = 2 * (q.w * q.y - q.z * q.x);
+  if (std::abs(sinp) >= 1)
+    angles.pitch = std::copysign(M_PI / 2, sinp);  // use 90 degrees if out of range
+  else
+    angles.pitch = std::asin(sinp);
+
+  // yaw (z-axis rotation)
+  double siny_cosp = 2 * (q.w * q.z + q.x * q.y);
+  double cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z);
+  angles.yaw = std::atan2(siny_cosp, cosy_cosp);
+
+  return angles;
+}
+
+
+
+
 NLO_Node::NLO_Node(const ros::NodeHandle& nh, const ros::NodeHandle& pnh)
   : nh_{ pnh }
   , init_{ false }
@@ -105,8 +134,8 @@ void NLO_Node::imuCallback(const sensor_msgs::Imu::ConstPtr& imu_Message_data)
 
     // Execution time
     auto start = std::chrono::steady_clock::now();
-    //nlo_.bufferIMUMessages(raw_acceleration_measurements,raw_gyro_measurements,ros_timeStampNow,deltaIMU,R_acc,R_gyro);
-    nlo_.predict(raw_gyro_measurements,raw_acceleration_measurements,ros_timeStampNow); 
+    nlo_.bufferIMUMessages(raw_acceleration_measurements,raw_gyro_measurements,ros_timeStampNow,deltaIMU,R_acc,R_gyro);
+    //nlo_.predict(raw_gyro_measurements,raw_acceleration_measurements,deltaIMU); 
 	auto end = std::chrono::steady_clock::now();
 
 	auto diff = end - start;
@@ -126,7 +155,7 @@ void NLO_Node::imuCallback(const sensor_msgs::Imu::ConstPtr& imu_Message_data)
       execution_time_vector_imu_.push_back(diff_in_ms);
     }
 
-    //eskf_.predict();
+    
   }
 
   previousTimeStampIMU_ = imu_Message_data->header.stamp;
@@ -156,7 +185,7 @@ void NLO_Node::dvlCallback(const nav_msgs::Odometry::ConstPtr& dvl_Message_data)
 
   auto start = std::chrono::steady_clock::now();
   nlo_.bufferDVLMessages(raw_dvl_measurements,ros_timeStampNow,R_dvl_);
-  nlo_.UpdateDVl(raw_dvl_measurements,R_dvl_);
+  //nlo_.UpdateDVl(raw_dvl_measurements,R_dvl_);
   auto end = std::chrono::steady_clock::now();
 
   auto diff = end - start;
@@ -195,8 +224,8 @@ void NLO_Node::pressureZCallback(const nav_msgs::Odometry::ConstPtr& pressureZ_M
   //ROS_INFO("PressureZ_timeStamp: %f",ros_timeStampNow);
 
   auto start = std::chrono::steady_clock::now();
-  //nlo_.bufferPressureZMessages(raw_pressure_z,ros_timeStampNow,R_pressureZ_);
-  nlo_.UpdatePressureZ(raw_pressure_z,R_pressureZ_);
+  nlo_.bufferPressureZMessages(raw_pressure_z,ros_timeStampNow,R_pressureZ_);
+  //nlo_.UpdatePressureZ(raw_pressure_z,R_pressureZ_);
   auto end = std::chrono::steady_clock::now();
 
   auto diff = end - start;
@@ -220,7 +249,7 @@ void NLO_Node::pressureZCallback(const nav_msgs::Odometry::ConstPtr& pressureZ_M
 void NLO_Node::publishPoseState(const ros::TimerEvent&)
 {
 
-  //nlo_.updateFilter();
+  nlo_.updateFilter();
 
   nav_msgs::Odometry odom_msg;
   static size_t trace_id{ 0 };
@@ -228,6 +257,22 @@ void NLO_Node::publishPoseState(const ros::TimerEvent&)
   const Vector3d& position = nlo_.getPosition();
   const Vector3d& velocity = nlo_.getVelocity();
   Quaterniond quaternion = nlo_.getQuaternion();
+
+  Quat quat_test;
+  quat_test.w = quaternion.w();
+  quat_test.x = quaternion.x();
+  quat_test.y = quaternion.y();
+  quat_test.z = quaternion.z();
+
+  EulerAngles roll_pitch_yaw;
+
+  roll_pitch_yaw = fromQuaternionToEulerAngles2(quat_test);
+  
+  std::cout<<"roll: "<<roll_pitch_yaw.roll * 180/PI <<std::endl;
+  std::cout<<"pitch: "<<roll_pitch_yaw.pitch * 180/PI <<std::endl;
+  std::cout<<"yaw: "<<roll_pitch_yaw.yaw * 180/PI   <<std::endl;
+
+  
 
   const MatrixXd& errorCovariance = nlo_.getErrorCovariance();
 
@@ -241,7 +286,7 @@ void NLO_Node::publishPoseState(const ros::TimerEvent&)
   attitude_error_covariance.setZero();
   attitude_error_covariance = errorCovariance.block<3,3>(6,6);
 
-  odom_msg.header.frame_id = "/eskf_link";
+  odom_msg.header.frame_id = "/nlo_link";
   odom_msg.header.seq = trace_id++;
   odom_msg.header.stamp = ros::Time::now();
   odom_msg.pose.pose.position.x = position(0);  // NEDpose(StateMemberX);
